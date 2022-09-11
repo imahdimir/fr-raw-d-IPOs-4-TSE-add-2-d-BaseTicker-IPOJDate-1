@@ -1,88 +1,142 @@
-##
-
 """
 
     """
 
-##
-
-from pathlib import Path
+import json
 
 import pandas as pd
-
 from githubdata import GithubData
-from mirutil import funcs as mf
+from mirutil.jdate import make_zero_padded_jdate_ie_iso_fmt as fu0
 
 
-repo_url = 'https://github.com/imahdimir/raw-d-IPOs'
-ipo_repo_url = 'https://github.com/imahdimir/d-BaseTicker-IPOJDate'
+class GDUrl :
+    with open('gdu.json' , 'r') as fi :
+        gj = json.load(fi)
 
-btick = 'BaseTicker'
-ipojd = 'IPOJDate'
+    cur = gj['cur']
+    src = gj['src']
+    src0 = gj['src0']
+    trg = gj['trg']
+
+gu = GDUrl()
+
+class ColName :
+    btic = 'BaseTicker'
+    ipojd = 'IPO_JDate'
+    tarz = 'تاريخ عرضه'
+    name = 'نام شركت'
+    cname = 'CompanyName'
+    ch = 'ch'
+    f = 'f'
+    ftic = 'FirmTicker'
+
+c = ColName()
+
+df_ch_cols = [c.name , 'تاريخ درج' , c.tarz , 'ميانگين قيمت']
+df_ch_0 = [None , None , None , 'روز اول عرضه-ريال']
+df_ch = pd.DataFrame([df_ch_0] , columns = df_ch_cols)
 
 def main() :
+    pass
 
-  pass
+    ##
 
-  ##
-  repo = GithubData(repo_url)
-  repo.clone_overwrite_last_version()
-  ##
-  dfpn = repo.local_path / 'TSE.xlsx'
-  df = pd.read_excel(dfpn)
-  ##
-  df['bt'] = df['نام نماد'].str[:-1]
-  ##
-  ptr = '\D+'
-  df['n'] = df['bt'].str.fullmatch(ptr)
-  ##
-  msk = df['n']
-  df.loc[msk, btick] = df['bt']
-  ##
-  df.loc[~ msk, btick] = df['bt'].str[:-1]
-  ##
-  df.columns
-  ##
-  df['samedate'] = df['تاریخ ابتدای بازه عرضه'].eq(df['تاریخ انتهای بازه عرضه'])
-  ##
-  df[ipojd] = df['تاریخ انتهای بازه عرضه']
-  ##
-  df[ipojd] = df[ipojd].str.replace('/', '-')
-  ##
+    gd_src = GithubData(gu.src)
+    gd_src.overwriting_clone()
+    ##
+    df = gd_src.read_data()
+    ##
+    df1 = df.iloc[:1]
+    assert df1.equals(df_ch) , "Not the same format as before"
+    ##
+    df = df[[c.name , c.tarz]]
+    ##
+    df.columns = [c.cname , c.ipojd]
+    ##
+    df = df.dropna()
+    ##
 
-  ipo_repo = GithubData(ipo_repo_url)
-  ipo_repo.clone_overwrite_last_version()
-  ##
-  ipo_fpn = ipo_repo.data_fps[0]
-  idf = pd.read_parquet(ipo_fpn)
-  ##
-  idf = idf.reset_index()
+    df[c.ipojd] = df[c.ipojd].str.strip()
+    ##
+    ptr = '\d+/\d+/\d+'
+    df[c.ch] = df[c.ipojd].str.fullmatch(ptr)
+    ##
+    df = df[df[c.ch]]
+    df = df.drop(c.ch , axis = 1)
+    ##
+    df[c.ipojd] = df[c.ipojd].str.replace('/' , '-')
+    ##
 
-  ##
-  df = df[[btick, ipojd]]
-  idf = idf.merge(df, how = 'outer')
-  ##
-  idf.to_parquet(ipo_fpn)
-  ##
-  commit_msg = 'added IPO dates from github repo: imahdimir/fr-raw-d-IPOs-4-IFB-add-2-d-BaseTicker-IPOJDate-1'
-  ipo_repo.commit_and_push_to_github_data_target(commit_msg)
+    ptr = '1[34]\d{2}-[01]\d-[0123]\d'
+    df[c.ch] = df[c.ipojd].str.fullmatch(ptr)
+    ##
+    msk = df[c.ch]
+    df.loc[msk , c.f] = df[c.ipojd]
 
-  ##
-  ipo_repo.rmdir()
-  repo.rmdir()
+    ##
+    ptr = r'1[34][089]\d-1?\d-[0123]?\d'
+    df[c.ch] = df[c.ipojd].str.fullmatch(ptr)
 
-  ##
+    ##
+    msk = df[c.ch]
+    msk &= df[c.f].isna()
+
+    df.loc[msk , c.f] = df[c.ipojd].apply(lambda x : fu0(x , sep = '-'))
+
+    ##
+
+    ptr = '([123]?\d)-(1?\d)-(1[34][089]\d)'
+    df[c.ch] = df[c.ipojd].str.fullmatch(ptr)
+    ##
+    msk = df[c.ch]
+    msk &= df[c.f].isna()
+
+    df.loc[msk , c.f] = df[c.ipojd].str.replace(ptr , r'\3-\2-\1')
+    ##
+    df.loc[msk , c.f] = df[c.f].apply(lambda x : fu0(x , sep = '-'))
+    ##
+
+    ptr = '1[34]\d{2}-[01]\d-[0123]\d'
+    assert df[c.f].str.fullmatch(ptr).all()
+
+    ##
+    df1 = df.copy()
+    df1[c.ipojd] = df1[c.f]
+    df1 = df1[[c.cname , c.ipojd]]
+
+    ##
+
+    gds0 = GithubData(gu.src0)
+    gds0.overwriting_clone()
+    ##
+    d0 = gds0.read_data()
+    ##
+    d0 = d0.set_index(c.cname)
+    ##
+
+    ##
+    df1[c.cname] = df1[c.cname].str.strip()
+    ##
+    df1[c.ftic] = df1[c.cname].map(d0[c.ftic])
+    ##
+
+    msk = df1[c.ftic].isna()
+
+    df2 = df1[msk]
+    print(len(df2))
+
+    ##
+
+    ##
 
 
+    ##
 
 
+    ##
 
-  ##
-
-
-
-
-  ##
-
+##
+if __name__ == '__main__' :
+    main()
 
 ##
